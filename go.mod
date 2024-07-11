@@ -1,4 +1,4 @@
-module goconsul
+module github.com/rudian/goconsul
 
 go 1.22.3
 
