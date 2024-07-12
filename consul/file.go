@@ -4,13 +4,17 @@ import (
 	"errors"
 	"fmt"
 	"github.com/hashicorp/consul/api"
-	"log"
+	"math/rand"
 	"strconv"
+	"sync"
 	"time"
 )
 
 type Service struct {
 	consulClient *api.Client
+	EnvTag       string
+	registeredId []string
+	mutex        *sync.Mutex
 }
 
 type RegisterService struct {
@@ -20,7 +24,7 @@ type RegisterService struct {
 	HeathCheckTTL time.Duration
 }
 
-func NewService(address ...string) (*Service, error) {
+func NewService(envTag string, address ...string) (*Service, error) {
 	consulConfig := api.DefaultConfig()
 	if len(address) >= 1 && address[0] != "" {
 		consulConfig.Address = address[0]
@@ -32,13 +36,32 @@ func NewService(address ...string) (*Service, error) {
 	}
 	return &Service{
 		consulClient: consulClient,
+		EnvTag:       envTag,
+		mutex:        &sync.Mutex{},
 	}, nil
 }
 
+func (this *Service) DeregisterAllService() {
+	this.mutex.Lock()
+	for _, id := range this.registeredId {
+		err := this.consulClient.Agent().ServiceDeregister(id)
+		if err != nil {
+			continue
+		}
+	}
+	this.registeredId = nil
+	this.mutex.Unlock()
+}
+
 func (this *Service) RegisterService(registerParam RegisterService) error {
-	healthCheckId := registerParam.ServiceName + "_" + time.Now().String()
+	healthCheckId := this.EnvTag + "_" + registerParam.ServiceName + "_" + time.Now().String()
+	this.mutex.Lock()
+	this.registeredId = append(this.registeredId, healthCheckId)
+	this.mutex.Unlock()
+
 	registerInfo := api.AgentServiceRegistration{
-		//	Tags:    []string{"aa", "bb"},
+		Tags:    []string{this.EnvTag},
+		ID:      healthCheckId,
 		Name:    registerParam.ServiceName,
 		Address: registerParam.Address,
 		Port:    registerParam.Port,
@@ -59,13 +82,16 @@ func (this *Service) RegisterService(registerParam RegisterService) error {
 	go func() {
 		ticker := time.NewTicker(registerParam.HeathCheckTTL / 2)
 		for {
+			if this.registeredId == nil {
+				return
+			}
+
 			err := this.consulClient.Agent().UpdateTTL(
 				healthCheckId,
 				"online",
 				api.HealthPassing,
 			)
 			if err != nil {
-				log.Fatalln(err)
 				return
 			}
 			<-ticker.C
@@ -75,15 +101,18 @@ func (this *Service) RegisterService(registerParam RegisterService) error {
 }
 
 func (this *Service) GetServiceAddress(serviceName string) (string, error) {
-	service, _, err := this.consulClient.Health().Service(serviceName, "", true, nil)
+	services, _, err := this.consulClient.Health().Service(serviceName, this.EnvTag, true, nil)
 	if err != nil {
 		fmt.Println("get service error: ", err)
 		return "", err
 	}
 
-	if len(service) > 0 {
-		address := service[0].Service.Address + ":" + strconv.Itoa(service[0].Service.Port)
-		return address, nil
+	if len(services) > 0 {
+		key := 0
+		if len(services) > 1 {
+			key = rand.Intn(len(services))
+		}
+		return services[key].Service.Address + ":" + strconv.Itoa(services[key].Service.Port), nil
 	}
 	return "", errors.New("service not found")
 }

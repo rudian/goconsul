@@ -9,7 +9,7 @@ docker run --name consul1 -d -p 8500:8500 -p 8300:8300 -p 8301:8301 -p 8302:8302
 If you dont inject consul server address, system will get the default one
 ```go
 //1. Start consul and inject the consul service address
-consulService, err := consul.NewService("127.0.0.1:8500")
+consulService, err := consul.NewService("test","127.0.0.1:8500")
 if err != nil {
     log.Fatal(err)
     return
@@ -31,7 +31,7 @@ if err != nil {
 ### Service Discovery
 ```go
 //1. Start consul and inject the consul service address
-consulService, err := consul.NewService("127.0.0.1:8500")
+consulService, err := consul.NewService("test","127.0.0.1:8500")
 if err != nil {
     log.Fatal(err)
     return
